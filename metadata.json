@@ -1,0 +1,5 @@
+{
+  "name": "PteroEngine Admin Dashboard",
+  "description": "A high-performance system administrator portal for game server hosting, inspired by the Pterodactyl panel with real-time metrics, terminal console, and technical UI aesthetics.",
+  "requestFramePermissions": []
+}
