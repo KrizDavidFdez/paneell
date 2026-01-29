@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ViewType, ServerStatus, LogEntry, FileItem, UserProfile } from './types';
 import Sidebar from './components/Sidebar';
 import Console from './components/Console';
@@ -8,6 +8,8 @@ import CreateProject from './components/CreateProject';
 import ServersList from './components/ServersList';
 import Startup from './components/Startup';
 import Profile from './components/Profile';
+
+const STORAGE_KEY = 'pteroengine_data_v1';
 
 const INITIAL_PROFILE: UserProfile = {
   name: "RootUser",
@@ -40,17 +42,96 @@ const INITIAL_SERVERS: ServerStatus[] = [
 ];
 
 const App: React.FC = () => {
+  // Inicialización desde LocalStorage
+  const [servers, setServers] = useState<ServerStatus[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.servers || INITIAL_SERVERS;
+      } catch (e) { return INITIAL_SERVERS; }
+    }
+    return INITIAL_SERVERS;
+  });
+
+  const [profile, setProfile] = useState<UserProfile>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.profile || INITIAL_PROFILE;
+      } catch (e) { return INITIAL_PROFILE; }
+    }
+    return INITIAL_PROFILE;
+  });
+
   const [activeView, setActiveView] = useState<ViewType>(ViewType.SERVERS);
-  const [servers, setServers] = useState<ServerStatus[]>(INITIAL_SERVERS);
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
-  const [profile, setProfile] = useState<UserProfile>(INITIAL_PROFILE);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const selectedServer = servers.find(s => s.id === selectedServerId) || null;
   const isServerSpecificView = [ViewType.OVERVIEW, ViewType.FILES, ViewType.STARTUP, ViewType.SETTINGS].includes(activeView);
 
+  // Persistencia automática
+  useEffect(() => {
+    const dataToSave = { servers, profile };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+  }, [servers, profile]);
+
   const addLog = (serverId: string, entry: LogEntry) => {
     setServers(prev => prev.map(s => s.id === serverId ? { ...s, logs: [...s.logs, entry] } : s));
+  };
+
+  const simulateDockerInstall = async (serverId: string, image: string, version: string) => {
+    const ts = () => new Date().toLocaleTimeString();
+    addLog(serverId, { timestamp: ts(), type: 'docker', message: `Initializing deployment for ${image}:${version}...` });
+    
+    const layers = ["layer-a1b2", "layer-c3d4", "layer-e5f6"];
+    for (const layer of layers) {
+      addLog(serverId, { timestamp: ts(), type: 'docker', message: `${layer}: Pulling fs layer...` });
+      let progress = 0;
+      while (progress <= 100) {
+        const barSize = 20;
+        const filled = Math.floor((progress / 100) * barSize);
+        const bar = '█'.repeat(filled) + '░'.repeat(barSize - filled);
+        addLog(serverId, { timestamp: '', type: 'raw', message: `${layer}: [${bar}] ${progress}%` });
+        progress += 25;
+        await new Promise(r => setTimeout(r, 200));
+        // Remove last line to simulate update? Simple terminal doesn't support overwrite yet, so we just append.
+      }
+      addLog(serverId, { timestamp: ts(), type: 'success', message: `${layer}: Pull complete` });
+    }
+    addLog(serverId, { timestamp: ts(), type: 'success', message: `Successfully deployed container.` });
+  };
+
+  const simulateDependencyInstall = async (serverId: string, manager: string, pkgName?: string) => {
+    const ts = () => new Date().toLocaleTimeString();
+    const folderName = manager === 'npm' ? 'node_modules' : manager === 'pip' ? 'venv' : manager === 'composer' ? 'vendor' : 'target';
+    
+    addLog(serverId, { timestamp: ts(), type: 'info', message: `Running ${manager} install...` });
+    
+    let progress = 0;
+    while (progress <= 100) {
+      const barSize = 40;
+      const filled = Math.floor((progress / 100) * barSize);
+      const bar = '█'.repeat(filled) + '░'.repeat(barSize - filled);
+      addLog(serverId, { timestamp: '', type: 'raw', message: `[${bar}] ${progress}% Installing dependencies...` });
+      progress += 10;
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    addLog(serverId, { timestamp: ts(), type: 'success', message: `Done. ${folderName} created.` });
+
+    // Crear carpeta automáticamente
+    const newFolder: FileItem = {
+      id: Math.random().toString(36).substr(2, 9),
+      name: folderName,
+      isDirectory: true,
+      path: '/',
+      size: '--',
+      modified: 'Justo ahora'
+    };
+    setServers(prev => prev.map(s => s.id === serverId ? { ...s, files: [...s.files, newFolder] } : s));
   };
 
   const handlePowerAction = async (action: 'start' | 'stop' | 'restart') => {
@@ -59,21 +140,11 @@ const App: React.FC = () => {
 
     if (action === 'start') {
       setServers(prev => prev.map(s => s.id === selectedServer.id ? {...s, status: 'starting'} : s));
-      addLog(selectedServer.id, { timestamp: ts(), type: 'info', message: 'Starting container...' });
+      addLog(selectedServer.id, { timestamp: ts(), type: 'info', message: 'Iniciando proceso del contenedor...' });
       
       setTimeout(() => {
         setServers(prev => prev.map(s => s.id === selectedServer.id ? {...s, status: 'running', cpu: Math.floor(Math.random()*15 + 5), ramUsage: 120} : s));
         addLog(selectedServer.id, { timestamp: ts(), type: 'success', message: 'Container is online.' });
-
-        selectedServer.files.forEach(file => {
-          if (!file.isDirectory && file.content) {
-            const regex = /(?:console\.log|print)\s*\(\s*['"`](.*?)['"`]\s*\)/g;
-            let match;
-            while ((match = regex.exec(file.content)) !== null) {
-              addLog(selectedServer.id, { timestamp: '', type: 'raw', message: match[1] });
-            }
-          }
-        });
       }, 1000);
     } else if (action === 'stop') {
       setServers(prev => prev.map(s => s.id === selectedServer.id ? {...s, status: 'stopping'} : s));
@@ -116,6 +187,30 @@ const App: React.FC = () => {
     setServers([...servers, newServer]);
     setSelectedServerId(newId);
     setActiveView(ViewType.OVERVIEW);
+
+    // Trigger Docker install
+    setTimeout(() => simulateDockerInstall(newId, config.template.defaultDockerImage, config.template.availableVersions[0]), 500);
+  };
+
+  const handleSendCommand = (cmd: string) => {
+    if (!selectedServer) return;
+    const ts = () => new Date().toLocaleTimeString();
+    addLog(selectedServer.id, { timestamp: ts(), type: 'input', message: cmd });
+
+    const lower = cmd.toLowerCase().trim();
+    if (lower === 'npm install' || lower === 'npm i' || lower === 'bun install' || lower === 'yarn') {
+      simulateDependencyInstall(selectedServer.id, 'npm');
+    } else if (lower.startsWith('pip install')) {
+      simulateDependencyInstall(selectedServer.id, 'pip');
+    } else if (lower === 'composer install') {
+      simulateDependencyInstall(selectedServer.id, 'composer');
+    } else if (lower === 'cargo build') {
+      simulateDependencyInstall(selectedServer.id, 'cargo');
+    } else if (lower === 'clear') {
+      setServers(prev => prev.map(s => s.id === selectedServer.id ? { ...s, logs: [] } : s));
+    } else {
+      setTimeout(() => addLog(selectedServer.id, { timestamp: '', type: 'raw', message: `bash: ${cmd}: command executed` }), 100);
+    }
   };
 
   return (
@@ -170,7 +265,6 @@ const App: React.FC = () => {
           </nav>
         )}
 
-        {/* Contenido Principal con Gestión de Scroll Mejorada */}
         <div className={`flex-1 overflow-hidden bg-black relative flex flex-col ${activeView !== ViewType.OVERVIEW ? 'overflow-y-auto p-4 lg:p-10' : ''}`}>
           {(() => {
             if (activeView === ViewType.PROFILE) return <Profile profile={profile} onUpdate={setProfile} />;
@@ -187,7 +281,6 @@ const App: React.FC = () => {
               case ViewType.OVERVIEW:
                 return (
                   <div className="flex flex-col h-full overflow-hidden p-4 lg:p-10 space-y-4 animate-in fade-in duration-300">
-                    {/* Stats fijos en la parte superior del overview */}
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 shrink-0">
                       <div className="bg-white/5 border border-white/10 p-5 rounded-2xl">
                         <p className="text-[9px] text-gray-500 font-black uppercase tracking-widest">Estado</p>
@@ -210,11 +303,8 @@ const App: React.FC = () => {
                       </div>
                     </div>
                     
-                    {/* La consola ahora ocupa TODO el espacio restante y tiene su propio scroll */}
                     <div className="flex-1 min-h-0 relative">
-                      <Console server={selectedServer} onSendCommand={(cmd) => {
-                        addLog(selectedServer.id, { timestamp: new Date().toLocaleTimeString(), type: 'input', message: cmd });
-                      }} />
+                      <Console server={selectedServer} onSendCommand={handleSendCommand} />
                     </div>
                   </div>
                 );
